@@ -41,24 +41,44 @@ function AlarmPage() {
     if (!audio) return
 
     const gain = audio.createGain()
+    const oscillator = audio.createOscillator()
+    const modulation = audio.createOscillator()
+    const depth = audio.createGain()
+    const now = audio.currentTime
+
+    // Neprekidno mijenjaj visinu sirene bez JavaScript vremenskih intervala.
+    oscillator.type = 'sine'
+    oscillator.frequency.value = 800
+    modulation.type = 'triangle'
+    modulation.frequency.value = 0.75
+    depth.gain.value = 400
+    modulation.connect(depth)
+    depth.connect(oscillator.frequency)
+    oscillator.connect(gain)
     gain.connect(audio.destination)
-    const beep = () => {
-      if (audio.state !== 'running') return
-      const now = audio.currentTime
-      const oscillator = audio.createOscillator()
-      oscillator.frequency.value = 880
-      oscillator.connect(gain)
-      gain.gain.setValueAtTime(0, now)
-      gain.gain.linearRampToValueAtTime(0.12, now + 0.02)
-      gain.gain.linearRampToValueAtTime(0, now + 0.4)
-      oscillator.onended = () => oscillator.disconnect()
-      oscillator.start(now)
-      oscillator.stop(now + 0.4)
+    gain.gain.setValueAtTime(0, now)
+    gain.gain.linearRampToValueAtTime(0.12, now + 0.05)
+    oscillator.start(now)
+    modulation.start(now)
+
+    const updateSoundWarning = () => {
+      setSoundWarning(
+        audio.state === 'running'
+          ? ''
+          : 'Zvuk sirene je blokiran ili prekinut. Vrati se na stranicu i provjeri zvuk uređaja.',
+      )
     }
-    beep()
-    const interval = window.setInterval(beep, 1000)
+    audio.addEventListener('statechange', updateSoundWarning)
+    updateSoundWarning()
+    void audio.resume().catch(() => {})
+
     return () => {
-      window.clearInterval(interval)
+      audio.removeEventListener('statechange', updateSoundWarning)
+      oscillator.stop()
+      modulation.stop()
+      oscillator.disconnect()
+      modulation.disconnect()
+      depth.disconnect()
       gain.disconnect()
     }
   }, [ringing])
@@ -77,7 +97,11 @@ function AlarmPage() {
 
     setSoundWarning('')
     try {
-      const audio = audioRef.current ?? new AudioContext()
+      const AudioContextClass = window.AudioContext ?? (
+        window as Window & { webkitAudioContext?: typeof AudioContext }
+      ).webkitAudioContext
+      if (!AudioContextClass) throw new Error('Web Audio nije podržan')
+      const audio = audioRef.current ?? new AudioContextClass()
       audioRef.current = audio
       void audio.resume().catch(() => {
         if (audioRef.current === audio) {
@@ -103,7 +127,9 @@ function AlarmPage() {
         Odaberi vrijeme prema lokalnom satu uređaja. Ako je vrijeme već prošlo,
         alarm se postavlja za sutra. Stranica mora ostati otvorena; preglednik
         može odgoditi alarm u pozadini ili dok uređaj spava. Osvježavanje stranice
-        briše alarm.
+        briše alarm. Ugrađena sirena svira do zaustavljanja, bez preuzimanja zvučnih
+        datoteka. Pojačaj zvuk uređaja; sirena zahtijeva preglednik s podrškom za
+        Web Audio i ne može zaobići utišan zvuk ili ograničenja uređaja.
       </p>
       <form onSubmit={setAlarm} className="space-y-4">
         <label className="block space-y-2">
